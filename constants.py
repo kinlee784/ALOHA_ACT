@@ -1,7 +1,7 @@
 import pathlib
 
 ### Task parameters
-DATA_DIR = '<put your data dir here>'
+DATA_DIR = '/home/core/workspace/kml/ALOHA_ACT/data'
 SIM_TASK_CONFIGS = {
     'sim_transfer_cube_scripted':{
         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
@@ -29,6 +29,38 @@ SIM_TASK_CONFIGS = {
         'num_episodes': 50,
         'episode_len': 500,
         'camera_names': ['top']
+    },
+}
+
+AGILE_TASK_CONFIGS = {
+    'airhockey_hit':{
+        'dataset_dir': DATA_DIR + '/airhockey_hit',
+        'dataset_name': 'straight_1000_pose_sv_w_preference_subset.pkl',
+        'num_episodes': 1000,  # num episodes in the dataset
+        'episode_len': 100,
+        'max_episode_len': 250,
+        'state_dim': 12,
+        'camera_names': [None]
+    },
+
+    'airhockey_defend':{
+        'dataset_dir': DATA_DIR + '/airhockey_defend',
+        'dataset_name': 'airhockey_defend.pkl',
+        'num_episodes': 50,
+        'episode_len': 100,
+        'max_episode_len': 250,
+        'state_dim': 12,
+        'camera_names': [None]
+    },
+
+    'pingpong': {
+        'dataset_dir': DATA_DIR + '/pingpong',
+        'dataset_name': 'pingpong.pkl',
+        'num_episodes': 50,
+        'episode_len': 100,
+        'max_episode_len': 250,
+        'state_dim': 20,
+        'camera_names': [None]
     },
 }
 
