@@ -61,7 +61,7 @@ class DETRVAE(nn.Module):
             # input_dim = 14 + 7 # robot_state + env_state
             self.input_proj_robot_state = nn.Linear(state_dim, hidden_dim)
             self.input_proj_env_state = nn.Linear(env_dim, hidden_dim)
-            self.pos = torch.nn.Embedding(2, hidden_dim)
+            self.pos = torch.nn.Embedding(3, hidden_dim) # pos, env_state, and latent
             self.backbones = None
 
         # encoder extra parameters
@@ -131,10 +131,14 @@ class DETRVAE(nn.Module):
             pos = torch.cat(all_cam_pos, axis=3)
             hs = self.transformer(src, None, self.query_embed.weight, pos, latent_input, proprio_input, self.additional_pos_embed.weight)[0]
         else:
+            # qpos = self.input_proj_robot_state(qpos)
+            # env_state = self.input_proj_env_state(env_state)
+            # transformer_input = torch.cat([qpos, env_state], axis=1) # seq length = 2
+            # hs = self.transformer(transformer_input, None, self.query_embed.weight, self.pos.weight)[0]
             qpos = self.input_proj_robot_state(qpos)
             env_state = self.input_proj_env_state(env_state)
-            transformer_input = torch.cat([qpos, env_state], axis=1) # seq length = 2
-            hs = self.transformer(transformer_input, None, self.query_embed.weight, self.pos.weight)[0]
+            transformer_input = torch.stack([qpos, env_state], axis=1) # seq length = 2
+            hs = self.transformer(transformer_input, None, self.query_embed.weight, self.pos.weight, latent_input)[0]
         a_hat = self.action_head(hs)
         is_pad_hat = self.is_pad_head(hs)
         return a_hat, is_pad_hat, [mu, logvar]

@@ -13,7 +13,7 @@ from constants import PUPPET_GRIPPER_JOINT_OPEN
 from utils_agile import load_data # data functions
 from utils_agile import sample_box_pose, sample_insertion_pose # robot functions
 from utils_agile import compute_dict_mean, set_seed, detach_dict # helper functions
-from policy import ACTPolicy, AgileACTPolicy, CNNMLPPolicy
+from policy import ACTPolicy, CNNMLPPolicy
 from visualize_episodes import save_videos
 
 from sim_env import BOX_POSE
@@ -44,7 +44,8 @@ def main(args):
     num_episodes = task_config['num_episodes']
     episode_len = task_config['episode_len']
     max_episode_len = task_config['max_episode_len']
-    state_dim = task_config['state_dim']
+    robot_dim = task_config['robot_dim']
+    env_dim = task_config['env_dim']
     camera_names = task_config['camera_names']
 
     # fixed parameters
@@ -65,7 +66,8 @@ def main(args):
                          'dec_layers': dec_layers,
                          'nheads': nheads,
                          'camera_names': camera_names,
-                         'state_dim': state_dim,
+                         'robot_dim': robot_dim,
+                         'env_dim': env_dim,
                          }
     elif policy_class == 'CNNMLP':
         policy_config = {'lr': args['lr'], 'lr_backbone': lr_backbone, 'backbone' : backbone, 'num_queries': 1,
@@ -77,7 +79,7 @@ def main(args):
         'num_epochs': num_epochs,
         'ckpt_dir': ckpt_dir,
         'episode_len': episode_len,
-        'state_dim': state_dim,
+        'state_dim': robot_dim,
         'lr': args['lr'],
         'policy_class': policy_class,
         'onscreen_render': onscreen_render,
@@ -129,8 +131,6 @@ def main(args):
 def make_policy(policy_class, policy_config):
     if policy_class == 'ACT':
         policy = ACTPolicy(policy_config)
-    elif policy_class == 'AgileACT':
-        policy = AgileACTPolicy(policy_config)
     elif policy_class == 'CNNMLP':
         policy = CNNMLPPolicy(policy_config)
     else:
@@ -325,13 +325,14 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
 def forward_pass(data, policy):
     bpos_data, bvel_data, qpos_data, qvel_data, action_data, is_pad = data
-    bpos_data, bvel_data, qpos_data, qvel_data, action_data, is_pad = bpos_data.cuda(), \
-                                                                      bvel_data.cuda(), \
-                                                                      qpos_data.cuda(), \
-                                                                      qvel_data.cuda(), \
-                                                                      action_data.cuda(), \
-                                                                      is_pad.cuda()
-    return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
+    b_data = torch.cat([bpos_data, bvel_data], dim=1).cuda()
+    q_data = torch.cat([qpos_data, qvel_data], dim=1).cuda()
+    action_data = action_data.cuda()
+    is_pad = is_pad.cuda()
+
+    image_data = None
+    kwargs = {'env_state': b_data}
+    return policy(q_data, image_data, action_data, is_pad, **kwargs) # TODO remove None
 
 
 def train_bc(train_dataloader, val_dataloader, config):

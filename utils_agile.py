@@ -130,8 +130,8 @@ def load_data(dataset_dir, dataset_name, num_episodes, horizon, max_path_length,
         states_all = []
         actions_all = []
         for traj in data:
-            states = np.array([t[0] for t in traj])
-            actions = np.array([t[1] for t in traj])
+            states = np.array([t[0] for t in traj], dtype=np.float32)
+            actions = np.array([t[1] for t in traj], dtype=np.float32)
             actions = actions.reshape(-1, 6)
             preferences = traj[0][6]  # all preferences are the same per trajectory (unused here)
 

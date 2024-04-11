@@ -1,7 +1,7 @@
 import pathlib
 
 ### Task parameters
-DATA_DIR = '/home/core/workspace/kml/ALOHA_ACT/data'
+DATA_DIR = '/coc/data/klee863/ALOHA_ACT/data'
 SIM_TASK_CONFIGS = {
     'sim_transfer_cube_scripted':{
         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
@@ -39,7 +39,8 @@ AGILE_TASK_CONFIGS = {
         'num_episodes': 1000,  # num episodes in the dataset
         'episode_len': 100,
         'max_episode_len': 250,
-        'state_dim': 12,
+        'robot_dim': 6,
+        'env_dim': 6,
         'camera_names': [None]
     },
 
@@ -49,7 +50,8 @@ AGILE_TASK_CONFIGS = {
         'num_episodes': 50,
         'episode_len': 100,
         'max_episode_len': 250,
-        'state_dim': 12,
+        'robot_dim': 6,
+        'env_dim': 6,
         'camera_names': [None]
     },
 
@@ -59,7 +61,8 @@ AGILE_TASK_CONFIGS = {
         'num_episodes': 50,
         'episode_len': 100,
         'max_episode_len': 250,
-        'state_dim': 20,
+        'robot_dim': 14,
+        'env_dim': 6,
         'camera_names': [None]
     },
 }
