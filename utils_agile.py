@@ -27,6 +27,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         episode_id = self.episode_ids[index]
         states = self.data[0][episode_id]
         actions = self.data[1][episode_id]
+        preferences = self.data[2][episode_id]
         original_action_shape = actions.shape
         episode_len = states.shape[0]
         if sample_full_episode:
@@ -35,10 +36,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
             start_ts = np.random.choice(episode_len)
 
         # get observation at start_ts only
-        bpos = states[start_ts, :3]  # TODO: need to change these for pingpong
+        bpos = states[start_ts, :3]
         bvel = states[start_ts, 3:6]
-        qpos = states[start_ts, 6:9]
-        qvel = states[start_ts, 9:]
+        # hack for both airhockey and pingpong
+        if states.shape[-1] == 12:
+            qpos = states[start_ts, 6:9]
+            qvel = states[start_ts, 9:]
+        elif states.shape[-1] == 20:
+            qpos = states[start_ts, 6:13]
+            qvel = states[start_ts, 13:]
 
         # get all actions after and including start_ts
         action = actions[start_ts:]
@@ -72,12 +78,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
 
 def get_norm_stats(data, dataset_name, num_episodes):
-    all_qpos_data = data[0][..., 6:9]
-    all_qvel_data = data[0][..., 9:]
+    if data[0].shape[-1] == 12:
+        all_qpos_data = data[0][..., 6:9]
+        all_qvel_data = data[0][..., 9:]
+    elif data[0].shape[-1] == 20:
+        all_qpos_data = data[0][..., 6:13]
+        all_qvel_data = data[0][..., 13:]
     all_bpos_data = data[0][..., :3]
     all_bvel_data = data[0][..., 3:6]
     all_action_data = data[1]
-    example_qpos = data[0][0,0,6:9]
 
     # normalize action data
     action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
@@ -108,8 +117,7 @@ def get_norm_stats(data, dataset_name, num_episodes):
              "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
              "qvel_mean": qvel_mean.numpy().squeeze(), "qvel_std": qvel_std.numpy().squeeze(),
              "bpos_mean": bpos_mean.numpy().squeeze(), "bpos_std": bpos_std.numpy().squeeze(),
-             "bvel_mean": bvel_mean.numpy().squeeze(), "bvel_std": bvel_std.numpy().squeeze(),
-             "example_qpos": example_qpos}
+             "bvel_mean": bvel_mean.numpy().squeeze(), "bvel_std": bvel_std.numpy().squeeze()}
 
     return stats
 
@@ -129,11 +137,12 @@ def load_data(dataset_dir, dataset_name, num_episodes, horizon, max_path_length,
 
         states_all = []
         actions_all = []
+        preferences_all = []
         for traj in data:
             states = np.array([t[0] for t in traj], dtype=np.float32)
             actions = np.array([t[1] for t in traj], dtype=np.float32)
             actions = actions.reshape(-1, 6)
-            preferences = traj[0][6]  # all preferences are the same per trajectory (unused here)
+            preferences = traj[0][6]  # all preferences are the same per trajectory
 
             path_length = len(states)
             if path_length > max_path_length:
@@ -151,9 +160,11 @@ def load_data(dataset_dir, dataset_name, num_episodes, horizon, max_path_length,
 
             states_all.append(states)
             actions_all.append(actions)
+            preferences_all.append(preferences)
         states_all = torch.from_numpy(np.array(states_all))
         actions_all = torch.from_numpy(np.array(actions_all))
-        processed_data = [states_all, actions_all]
+        preferences_all = torch.from_numpy(np.array(preferences_all))
+        processed_data = [states_all, actions_all, preferences_all]
 
     # obtain normalization stats for qpos and action
     norm_stats = get_norm_stats(processed_data, dataset_name, num_episodes)

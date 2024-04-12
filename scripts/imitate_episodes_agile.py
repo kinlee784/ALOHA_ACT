@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import os
+import random
 import pickle
 import argparse
 import matplotlib.pyplot as plt
@@ -8,15 +9,13 @@ from copy import deepcopy
 from tqdm import tqdm
 from einops import rearrange
 
-from constants import DT
-from constants import PUPPET_GRIPPER_JOINT_OPEN
 from utils_agile import load_data # data functions
-from utils_agile import sample_box_pose, sample_insertion_pose # robot functions
 from utils_agile import compute_dict_mean, set_seed, detach_dict # helper functions
 from policy import ACTPolicy, CNNMLPPolicy
 from visualize_episodes import save_videos
 
 from sim_env import BOX_POSE
+from air_hockey_challenge.framework.air_hockey_challenge_wrapper import AirHockeyChallengeWrapper
 
 import IPython
 e = IPython.embed
@@ -80,6 +79,7 @@ def main(args):
         'ckpt_dir': ckpt_dir,
         'episode_len': episode_len,
         'state_dim': robot_dim,
+        'env_dim': env_dim,
         'lr': args['lr'],
         'policy_class': policy_class,
         'onscreen_render': onscreen_render,
@@ -92,10 +92,11 @@ def main(args):
     }
 
     if is_eval:
-        ckpt_names = [f'policy_best.ckpt']
+        # ckpt_names = [f'policy_best.ckpt']
+        ckpt_names = [f'policy_epoch_100_seed_0.ckpt']
         results = []
         for ckpt_name in ckpt_names:
-            success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True)
+            success_rate, avg_return = eval_bc(config, ckpt_name, dataset_name, save_episode=True)
             results.append([ckpt_name, success_rate, avg_return])
 
         for ckpt_name, success_rate, avg_return in results:
@@ -126,6 +127,23 @@ def main(args):
     ckpt_path = os.path.join(ckpt_dir, f'policy_best.ckpt')
     torch.save(best_state_dict, ckpt_path)
     print(f'Best ckpt, val loss {min_val_loss:.6f} @ epoch{best_epoch}')
+
+def load_demo_data(traj_list, dataset_path, num_traj_to_load):
+    with open(dataset_path, "rb") as f:
+        data = pickle.load(f)
+    traj_list.extend(data[:num_traj_to_load])
+
+def sample_demo_data(traj_list):
+    # traj_num = jax.random.randint(rng_key, (1,), 0, len(traj_list))
+    rand = random.randint(0, 999)
+
+    traj_data = traj_list[rand]
+    # traj_data = traj_list[50]    # comment to not use hardcoded traj
+    traj_init_state = traj_data[0][0]
+    traj_actions = [traj_data[i][1] for i in range(len(traj_data))]
+    pref = traj_data[0][6]
+
+    return (traj_init_state, traj_actions, pref)  # list of (2,3)
 
 
 def make_policy(policy_class, policy_config):
@@ -158,19 +176,17 @@ def get_image(ts, camera_names):
     return curr_image
 
 
-def eval_bc(config, ckpt_name, save_episode=True):
+def eval_bc(config, ckpt_name, dataset_name, save_episode=True):
     set_seed(1000)
     ckpt_dir = config['ckpt_dir']
     state_dim = config['state_dim']
-    real_robot = config['real_robot']
+    env_dim = config['env_dim']
     policy_class = config['policy_class']
     onscreen_render = config['onscreen_render']
     policy_config = config['policy_config']
-    camera_names = config['camera_names']
     max_timesteps = config['episode_len']
     task_name = config['task_name']
     temporal_agg = config['temporal_agg']
-    onscreen_cam = 'angle'
 
     # load policy and stats
     ckpt_path = os.path.join(ckpt_dir, ckpt_name)
@@ -184,19 +200,22 @@ def eval_bc(config, ckpt_name, save_episode=True):
     with open(stats_path, 'rb') as f:
         stats = pickle.load(f)
 
-    pre_process = lambda s_qpos: (s_qpos - stats['qpos_mean']) / stats['qpos_std']
+    # load dataset to get starting configurations
+    dataset_path = os.path.join(os.path.dirname(ckpt_dir), dataset_name)
+    traj_list = []
+    load_demo_data(traj_list, dataset_path, num_traj_to_load=1000)
+
+    pre_process = lambda obs: (obs - np.concatenate((stats['bpos_mean'], stats['bvel_mean'], stats['qpos_mean'], stats['qvel_mean']))) / \
+                              np.concatenate((stats['bpos_std'], stats['bvel_std'], stats['qpos_std'], stats['qvel_std']))
     post_process = lambda a: a * stats['action_std'] + stats['action_mean']
 
     # load environment
-    if real_robot:
-        from aloha_scripts.robot_utils import move_grippers # requires aloha
-        from aloha_scripts.real_env import make_real_env # requires aloha
-        env = make_real_env(init_node=True)
-        env_max_reward = 0
+    if 'hit' in task_name:
+        env = AirHockeyChallengeWrapper(env="3dof-hit", interpolation_order=3, debug=False)
+    elif 'defend' in task_name:
+        env = AirHockeyChallengeWrapper(env="3dof-defend", interpolation_order=3, debug=False)
     else:
-        from sim_env import make_sim_env
-        env = make_sim_env(task_name)
-        env_max_reward = env.task.max_reward
+        raise NotImplementedError
 
     query_frequency = policy_config['num_queries']
     if temporal_agg:
@@ -206,57 +225,35 @@ def eval_bc(config, ckpt_name, save_episode=True):
     max_timesteps = int(max_timesteps * 1) # may increase for real-world tasks
 
     num_rollouts = 50
-    episode_returns = []
-    highest_rewards = []
+    successful_trajs = 0
     for rollout_id in range(num_rollouts):
-        rollout_id += 0
-        ### set task
-        if 'sim_transfer_cube' in task_name:
-            BOX_POSE[0] = sample_box_pose() # used in sim reset
-        elif 'sim_insertion' in task_name:
-            BOX_POSE[0] = np.concatenate(sample_insertion_pose()) # used in sim reset
-
-        ts = env.reset()
-
-        ### onscreen render
-        if onscreen_render:
-            ax = plt.subplot()
-            plt_img = ax.imshow(env._physics.render(height=480, width=640, camera_id=onscreen_cam))
-            plt.ion()
+        demo_init_state, _, preference = sample_demo_data(traj_list)
+        obs = env.reset(demo_init_state.copy())
 
         ### evaluation loop
         if temporal_agg:
             all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, state_dim]).cuda()
 
-        qpos_history = torch.zeros((1, max_timesteps, state_dim)).cuda()
-        image_list = [] # for visualization
-        qpos_list = []
-        target_qpos_list = []
-        rewards = []
+        obs_history = torch.zeros((1, max_timesteps, env_dim+state_dim)).cuda()
+        q_list = []
+        target_q_list = []
         with torch.inference_mode():
             for t in range(max_timesteps):
                 ### update onscreen render and wait for DT
                 if onscreen_render:
-                    image = env._physics.render(height=480, width=640, camera_id=onscreen_cam)
-                    plt_img.set_data(image)
-                    plt.pause(DT)
+                    env.render(record=False)
 
-                ### process previous timestep to get qpos and image_list
-                obs = ts.observation
-                if 'images' in obs:
-                    image_list.append(obs['images'])
-                else:
-                    image_list.append({'main': obs['image']})
-                qpos_numpy = np.array(obs['qpos'])
-                qpos = pre_process(qpos_numpy)
-                qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
-                qpos_history[:, t] = qpos
-                curr_image = get_image(ts, camera_names)
+                ### process previous timestep to get qpos
+                obs_numpy = obs
+                obs = pre_process(obs_numpy)
+                obs = torch.from_numpy(obs).float().cuda().unsqueeze(0)
+                obs_history[:, t] = obs
 
                 ### query policy
                 if config['policy_class'] == "ACT":
                     if t % query_frequency == 0:
-                        all_actions = policy(qpos, curr_image)
+                        kwargs = {'env_state': obs[:, :env_dim]}
+                        all_actions = policy(obs[:, env_dim:], image=None, **kwargs)
                     if temporal_agg:
                         all_time_actions[[t], t:t+num_queries] = all_actions
                         actions_for_curr_step = all_time_actions[:, t]
@@ -269,56 +266,49 @@ def eval_bc(config, ckpt_name, save_episode=True):
                         raw_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
                     else:
                         raw_action = all_actions[:, t % query_frequency]
-                elif config['policy_class'] == "CNNMLP":
-                    raw_action = policy(qpos, curr_image)
                 else:
                     raise NotImplementedError
 
                 ### post-process actions
                 raw_action = raw_action.squeeze(0).cpu().numpy()
                 action = post_process(raw_action)
-                target_qpos = action
+                target_q = action
 
                 ### step the environment
-                ts = env.step(target_qpos)
+                obs, _, done, info = env.step(target_q.reshape(-1, 2, 3).squeeze())
 
                 ### for visualization
-                qpos_list.append(qpos_numpy)
-                target_qpos_list.append(target_qpos)
-                rewards.append(ts.reward)
+                q_list.append(obs_numpy[env_dim:])
+                target_q_list.append(target_q)
 
-            plt.close()
-        if real_robot:
-            move_grippers([env.puppet_bot_left, env.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)  # open
-            pass
+                if done:
+                    if info['success']:
+                        successful_trajs += 1
+                    break
 
-        rewards = np.array(rewards)
-        episode_return = np.sum(rewards[rewards!=None])
-        episode_returns.append(episode_return)
-        episode_highest_reward = np.max(rewards)
-        highest_rewards.append(episode_highest_reward)
-        print(f'Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, {env_max_reward=}, Success: {episode_highest_reward==env_max_reward}')
+            success_rate = successful_trajs / (rollout_id+1)
+            print(f"Current success rate: {success_rate} ({successful_trajs}/{rollout_id+1})")
 
-        if save_episode:
-            save_videos(image_list, DT, video_path=os.path.join(ckpt_dir, f'video{rollout_id}.mp4'))
+        # if save_episode:
+        #     save_videos(image_list, DT, video_path=os.path.join(ckpt_dir, f'video{rollout_id}.mp4'))
 
-    success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
-    avg_return = np.mean(episode_returns)
+    # success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
+    avg_return = 0 # no return
     summary_str = f'\nSuccess rate: {success_rate}\nAverage return: {avg_return}\n\n'
-    for r in range(env_max_reward+1):
-        more_or_equal_r = (np.array(highest_rewards) >= r).sum()
-        more_or_equal_r_rate = more_or_equal_r / num_rollouts
-        summary_str += f'Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate*100}%\n'
-
-    print(summary_str)
+    # for r in range(env_max_reward+1):
+    #     more_or_equal_r = (np.array(highest_rewards) >= r).sum()
+    #     more_or_equal_r_rate = more_or_equal_r / num_rollouts
+    #     summary_str += f'Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate*100}%\n'
+    #
+    # print(summary_str)
 
     # save success rate to txt
-    result_file_name = 'result_' + ckpt_name.split('.')[0] + '.txt'
-    with open(os.path.join(ckpt_dir, result_file_name), 'w') as f:
-        f.write(summary_str)
-        f.write(repr(episode_returns))
-        f.write('\n\n')
-        f.write(repr(highest_rewards))
+    # result_file_name = 'result_' + ckpt_name.split('.')[0] + '.txt'
+    # with open(os.path.join(ckpt_dir, result_file_name), 'w') as f:
+    #     f.write(summary_str)
+    #     f.write(repr(episode_returns))
+    #     f.write('\n\n')
+    #     f.write(repr(highest_rewards))
 
     return success_rate, avg_return
 
