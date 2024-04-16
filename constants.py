@@ -33,10 +33,10 @@ SIM_TASK_CONFIGS = {
 }
 
 AGILE_TASK_CONFIGS = {
-    'airhockey_hit':{
+    'airhockey_hit': {
         'dataset_dir': DATA_DIR + '/airhockey_hit',
-        'dataset_name': 'straight_1000_pose_sv_w_preference_subset.pkl',
-        'num_episodes': 1000,  # num episodes in the dataset
+        'dataset_names': ['straight_100_pose_sv_w_preference.pkl', 'right_100_pose_sv_w_preference.pkl'],
+        'num_episodes': 200,  # num episodes in the total dataset
         'episode_len': 100,
         'max_episode_len': 250,
         'robot_dim': 6,

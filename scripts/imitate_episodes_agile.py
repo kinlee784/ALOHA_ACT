@@ -39,7 +39,7 @@ def main(args):
     task_config = AGILE_TASK_CONFIGS[task_name]
 
     dataset_dir = task_config['dataset_dir']
-    dataset_name = task_config['dataset_name']
+    dataset_names = task_config['dataset_names']
     num_episodes = task_config['num_episodes']
     episode_len = task_config['episode_len']
     max_episode_len = task_config['max_episode_len']
@@ -96,7 +96,7 @@ def main(args):
         ckpt_names = [f'policy_epoch_100_seed_0.ckpt']
         results = []
         for ckpt_name in ckpt_names:
-            success_rate, avg_return = eval_bc(config, ckpt_name, dataset_name, save_episode=True)
+            success_rate, avg_return = eval_bc(config, ckpt_name, dataset_names, save_episode=True)
             results.append([ckpt_name, success_rate, avg_return])
 
         for ckpt_name, success_rate, avg_return in results:
@@ -105,7 +105,7 @@ def main(args):
         exit()
 
     train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir,
-                                                           dataset_name,
+                                                           dataset_names,
                                                            num_episodes,
                                                            episode_len,
                                                            max_episode_len,
@@ -314,14 +314,15 @@ def eval_bc(config, ckpt_name, dataset_name, save_episode=True):
 
 
 def forward_pass(data, policy):
-    bpos_data, bvel_data, qpos_data, qvel_data, action_data, is_pad = data
+    bpos_data, bvel_data, qpos_data, qvel_data, action_data, preferences, is_pad = data
     b_data = torch.cat([bpos_data, bvel_data], dim=1).cuda()
     q_data = torch.cat([qpos_data, qvel_data], dim=1).cuda()
     action_data = action_data.cuda()
+    preference_data = preferences[:, 0].unsqueeze(1).cuda()
     is_pad = is_pad.cuda()
 
     image_data = None
-    kwargs = {'env_state': b_data}
+    kwargs = {'env_state': b_data, 'preferences': preference_data}
     return policy(q_data, image_data, action_data, is_pad, **kwargs) # TODO remove None
 
 

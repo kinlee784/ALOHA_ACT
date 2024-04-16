@@ -17,6 +17,7 @@ class ACTPolicy(nn.Module):
 
     def __call__(self, qpos, image, actions=None, is_pad=None, **kwargs):
         env_state = kwargs['env_state'] if 'env_state' in kwargs else None
+        preferences = kwargs['preferences'] if 'preferences' in kwargs else None
 
         if image is not None:
             normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -26,7 +27,7 @@ class ACTPolicy(nn.Module):
             actions = actions[:, :self.model.num_queries]
             is_pad = is_pad[:, :self.model.num_queries]
 
-            a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, image, env_state, actions, is_pad)
+            a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, image, env_state, actions, preferences, is_pad)
             total_kld, dim_wise_kld, mean_kld = kl_divergence(mu, logvar)
             loss_dict = dict()
             all_l1 = F.l1_loss(actions, a_hat, reduction='none')
@@ -36,7 +37,7 @@ class ACTPolicy(nn.Module):
             loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
             return loss_dict
         else: # inference time
-            a_hat, _, (_, _) = self.model(qpos, image, env_state) # no action, sample from prior
+            a_hat, _, (_, _) = self.model(qpos, image, env_state, preferences) # no action, sample from prior
             return a_hat
 
     def configure_optimizers(self):

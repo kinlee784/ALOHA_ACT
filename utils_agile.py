@@ -66,6 +66,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         qpos_data = qpos.float()
         qvel_data = qvel.float()
         action_data = padded_action.float()
+        preferences = preferences.float()
         is_pad = is_pad.bool()
 
         action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
@@ -74,10 +75,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
         qvel_data = (qvel_data - self.norm_stats["qvel_mean"]) / self.norm_stats["qvel_std"]
 
-        return bpos_data, bvel_data, qpos_data, qvel_data, action_data, is_pad
+        return bpos_data, bvel_data, qpos_data, qvel_data, action_data, preferences, is_pad
 
 
-def get_norm_stats(data, dataset_name, num_episodes):
+def get_norm_stats(data):
     if data[0].shape[-1] == 12:
         all_qpos_data = data[0][..., 6:9]
         all_qvel_data = data[0][..., 9:]
@@ -122,7 +123,7 @@ def get_norm_stats(data, dataset_name, num_episodes):
     return stats
 
 
-def load_data(dataset_dir, dataset_name, num_episodes, horizon, max_path_length, camera_names, batch_size_train, batch_size_val):
+def load_data(dataset_dir, dataset_names, num_episodes, horizon, max_path_length, camera_names, batch_size_train, batch_size_val):
     print(f'\nData from: {dataset_dir}\n')
     # obtain train test split
     train_ratio = 0.8
@@ -130,44 +131,46 @@ def load_data(dataset_dir, dataset_name, num_episodes, horizon, max_path_length,
     train_indices = shuffled_indices[:int(train_ratio * num_episodes)]
     val_indices = shuffled_indices[int(train_ratio * num_episodes):]
 
-    dataset_path = os.path.join(dataset_dir, dataset_name)
-    print("Loading pickle file: ", dataset_path)
-    with open(dataset_path, 'rb') as f:
-        data = pickle.load(f)
+    states_all = []
+    actions_all = []
+    preferences_all = []
 
-        states_all = []
-        actions_all = []
-        preferences_all = []
-        for traj in data:
-            states = np.array([t[0] for t in traj], dtype=np.float32)
-            actions = np.array([t[1] for t in traj], dtype=np.float32)
-            actions = actions.reshape(-1, 6)
-            preferences = traj[0][6]  # all preferences are the same per trajectory
+    for dataset_name in dataset_names:
+        dataset_path = os.path.join(dataset_dir, dataset_name)
+        print("Loading pickle file: ", dataset_path)
+        with open(dataset_path, 'rb') as f:
+            data = pickle.load(f)
 
-            path_length = len(states)
-            if path_length > max_path_length:
-                raise ValueError(
-                    f"Path length: {path_length} is greater than max trajectory length: {max_path_length}")
+            for traj in data:
+                states = np.array([t[0] for t in traj], dtype=np.float32)
+                actions = np.array([t[1] for t in traj], dtype=np.float32)
+                actions = actions.reshape(-1, 6)
+                preferences = traj[0][6]  # all preferences are the same per trajectory
 
-            if horizon > path_length:
-                # pad all the trajectories up to the horizon length at least
-                states = np.pad(states, ((0, horizon - path_length), (0, 0)), 'edge')
-                actions = np.pad(actions, ((0, horizon - path_length), (0, 0)), 'edge')
-            elif horizon < path_length:
-                # truncate the data outside of horizon
-                states = states[:horizon]
-                actions = actions[:horizon]
+                path_length = len(states)
+                if path_length > max_path_length:
+                    raise ValueError(
+                        f"Path length: {path_length} is greater than max trajectory length: {max_path_length}")
 
-            states_all.append(states)
-            actions_all.append(actions)
-            preferences_all.append(preferences)
-        states_all = torch.from_numpy(np.array(states_all))
-        actions_all = torch.from_numpy(np.array(actions_all))
-        preferences_all = torch.from_numpy(np.array(preferences_all))
-        processed_data = [states_all, actions_all, preferences_all]
+                if horizon > path_length:
+                    # pad all the trajectories up to the horizon length at least
+                    states = np.pad(states, ((0, horizon - path_length), (0, 0)), 'edge')
+                    actions = np.pad(actions, ((0, horizon - path_length), (0, 0)), 'edge')
+                elif horizon < path_length:
+                    # truncate the data outside of horizon
+                    states = states[:horizon]
+                    actions = actions[:horizon]
+
+                states_all.append(states)
+                actions_all.append(actions)
+                preferences_all.append(preferences)
+    states_all = torch.from_numpy(np.array(states_all))
+    actions_all = torch.from_numpy(np.array(actions_all))
+    preferences_all = torch.from_numpy(np.array(preferences_all))
+    processed_data = [states_all, actions_all, preferences_all]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(processed_data, dataset_name, num_episodes)
+    norm_stats = get_norm_stats(processed_data)
 
     # construct dataset and dataloader
     train_dataset = EpisodicDataset(train_indices, dataset_dir, processed_data, norm_stats)
