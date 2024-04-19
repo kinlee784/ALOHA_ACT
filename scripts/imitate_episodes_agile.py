@@ -37,9 +37,9 @@ def main(args):
 
     from constants import AGILE_TASK_CONFIGS
     task_config = AGILE_TASK_CONFIGS[task_name]
-
     dataset_dir = task_config['dataset_dir']
     dataset_names = task_config['dataset_names']
+    eval_dataset_name = task_config['eval_dataset_name']
     num_episodes = task_config['num_episodes']
     episode_len = task_config['episode_len']
     max_episode_len = task_config['max_episode_len']
@@ -92,11 +92,11 @@ def main(args):
     }
 
     if is_eval:
-        # ckpt_names = [f'policy_best.ckpt']
-        ckpt_names = [f'policy_epoch_100_seed_0.ckpt']
+        ckpt_names = [f'policy_best.ckpt']
+        # ckpt_names = [f'policy_epoch_600_seed_0.ckpt']
         results = []
         for ckpt_name in ckpt_names:
-            success_rate, avg_return = eval_bc(config, ckpt_name, dataset_names, save_episode=True)
+            success_rate, avg_return = eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True)
             results.append([ckpt_name, success_rate, avg_return])
 
         for ckpt_name, success_rate, avg_return in results:
@@ -134,7 +134,6 @@ def load_demo_data(traj_list, dataset_path, num_traj_to_load):
     traj_list.extend(data[:num_traj_to_load])
 
 def sample_demo_data(traj_list):
-    # traj_num = jax.random.randint(rng_key, (1,), 0, len(traj_list))
     rand = random.randint(0, 999)
 
     traj_data = traj_list[rand]
@@ -145,6 +144,10 @@ def sample_demo_data(traj_list):
 
     return (traj_init_state, traj_actions, pref)  # list of (2,3)
 
+def get_starting_config(traj_list, idx):
+    traj_init_state = traj_list[idx]
+
+    return traj_init_state
 
 def make_policy(policy_class, policy_config):
     if policy_class == 'ACT':
@@ -176,7 +179,8 @@ def get_image(ts, camera_names):
     return curr_image
 
 
-def eval_bc(config, ckpt_name, dataset_name, save_episode=True):
+def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
+    pref = np.array([1])
     set_seed(1000)
     ckpt_dir = config['ckpt_dir']
     state_dim = config['state_dim']
@@ -201,7 +205,7 @@ def eval_bc(config, ckpt_name, dataset_name, save_episode=True):
         stats = pickle.load(f)
 
     # load dataset to get starting configurations
-    dataset_path = os.path.join(os.path.dirname(ckpt_dir), dataset_name)
+    dataset_path = os.path.join(os.path.dirname(ckpt_dir), eval_dataset_name)
     traj_list = []
     load_demo_data(traj_list, dataset_path, num_traj_to_load=1000)
 
@@ -224,17 +228,17 @@ def eval_bc(config, ckpt_name, dataset_name, save_episode=True):
 
     max_timesteps = int(max_timesteps * 1) # may increase for real-world tasks
 
-    num_rollouts = 50
+    num_rollouts = 1000
     successful_trajs = 0
     for rollout_id in range(num_rollouts):
-        demo_init_state, _, preference = sample_demo_data(traj_list)
+        # demo_init_state, _, preference = sample_demo_data(traj_list)
+        demo_init_state = get_starting_config(traj_list, rollout_id)
         obs = env.reset(demo_init_state.copy())
 
         ### evaluation loop
         if temporal_agg:
             all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, state_dim]).cuda()
 
-        obs_history = torch.zeros((1, max_timesteps, env_dim+state_dim)).cuda()
         q_list = []
         target_q_list = []
         with torch.inference_mode():
@@ -247,12 +251,11 @@ def eval_bc(config, ckpt_name, dataset_name, save_episode=True):
                 obs_numpy = obs
                 obs = pre_process(obs_numpy)
                 obs = torch.from_numpy(obs).float().cuda().unsqueeze(0)
-                obs_history[:, t] = obs
 
                 ### query policy
                 if config['policy_class'] == "ACT":
                     if t % query_frequency == 0:
-                        kwargs = {'env_state': obs[:, :env_dim]}
+                        kwargs = {'env_state': obs[:, :env_dim], 'preferences': torch.tensor([1], dtype=torch.float32, device='cuda').unsqueeze(0)}
                         all_actions = policy(obs[:, env_dim:], image=None, **kwargs)
                     if temporal_agg:
                         all_time_actions[[t], t:t+num_queries] = all_actions

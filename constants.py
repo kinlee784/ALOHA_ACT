@@ -1,7 +1,7 @@
 import pathlib
 
 ### Task parameters
-DATA_DIR = '/coc/data/klee863/ALOHA_ACT/data'
+DATA_DIR = '/home/core/workspace/kml/ALOHA_ACT/data'
 SIM_TASK_CONFIGS = {
     'sim_transfer_cube_scripted':{
         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
@@ -36,8 +36,9 @@ AGILE_TASK_CONFIGS = {
     'airhockey_hit': {
         'dataset_dir': DATA_DIR + '/airhockey_hit',
         'dataset_names': ['straight_100_pose_sv_w_preference.pkl', 'right_100_pose_sv_w_preference.pkl'],
+        'eval_dataset_name': 'hit_start_corrected.pkl',
         'num_episodes': 200,  # num episodes in the total dataset
-        'episode_len': 100,
+        'episode_len': 250,
         'max_episode_len': 250,
         'robot_dim': 6,
         'env_dim': 6,
@@ -47,6 +48,7 @@ AGILE_TASK_CONFIGS = {
     'airhockey_defend':{
         'dataset_dir': DATA_DIR + '/airhockey_defend',
         'dataset_name': 'airhockey_defend.pkl',
+        'eval_dataset_name': '???.pkl',
         'num_episodes': 50,
         'episode_len': 100,
         'max_episode_len': 250,
