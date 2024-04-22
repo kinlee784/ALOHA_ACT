@@ -1,7 +1,7 @@
 import pathlib
 
 ### Task parameters
-DATA_DIR = '/home/core/workspace/kml/ALOHA_ACT/data'
+DATA_DIR = '/coc/data/klee863/ALOHA_ACT/data'
 SIM_TASK_CONFIGS = {
     'sim_transfer_cube_scripted':{
         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
@@ -38,7 +38,7 @@ AGILE_TASK_CONFIGS = {
         'dataset_names': ['straight_100_pose_sv_w_preference.pkl', 'right_100_pose_sv_w_preference.pkl'],
         'eval_dataset_name': 'hit_start_corrected.pkl',
         'num_episodes': 200,  # num episodes in the total dataset
-        'episode_len': 250,
+        'episode_len': 100,  # change this to 250 at test time
         'max_episode_len': 250,
         'robot_dim': 6,
         'env_dim': 6,
@@ -47,11 +47,11 @@ AGILE_TASK_CONFIGS = {
 
     'airhockey_defend':{
         'dataset_dir': DATA_DIR + '/airhockey_defend',
-        'dataset_name': 'airhockey_defend.pkl',
-        'eval_dataset_name': '???.pkl',
-        'num_episodes': 50,
-        'episode_len': 100,
-        'max_episode_len': 250,
+        'dataset_names': ['defending_hard_v2_100.pkl'],
+        'eval_dataset_name': 'defending_hard_test_set_v2_1000.pkl',
+        'num_episodes': 100,  # change this to 250 at test time
+        'episode_len': 250,
+        'max_episode_len': 251,
         'robot_dim': 6,
         'env_dim': 6,
         'camera_names': [None]
@@ -59,7 +59,7 @@ AGILE_TASK_CONFIGS = {
 
     'pingpong': {
         'dataset_dir': DATA_DIR + '/pingpong',
-        'dataset_name': 'pingpong.pkl',
+        'dataset_names': 'pingpong.pkl',
         'num_episodes': 50,
         'episode_len': 100,
         'max_episode_len': 250,
