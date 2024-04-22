@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from time import time
 import os
 import random
 import pickle
@@ -14,8 +15,9 @@ from utils_agile import compute_dict_mean, set_seed, detach_dict # helper functi
 from policy import ACTPolicy, CNNMLPPolicy
 from visualize_episodes import save_videos
 
-from sim_env import BOX_POSE
 from air_hockey_challenge.framework.air_hockey_challenge_wrapper import AirHockeyChallengeWrapper
+from air_hockey_challenge.framework.agent_base import AgentBase
+from air_hockey_challenge.utils.kinematics import forward_kinematics
 
 import IPython
 e = IPython.embed
@@ -93,7 +95,7 @@ def main(args):
 
     if is_eval:
         ckpt_names = [f'policy_best.ckpt']
-        # ckpt_names = [f'policy_epoch_600_seed_0.ckpt']
+        # ckpt_names = [f'policy_epoch_900_seed_0.ckpt']
         results = []
         for ckpt_name in ckpt_names:
             success_rate, avg_return = eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True)
@@ -144,10 +146,40 @@ def sample_demo_data(traj_list):
 
     return (traj_init_state, traj_actions, pref)  # list of (2,3)
 
-def get_starting_config(traj_list, idx):
-    traj_init_state = traj_list[idx]
+def get_starting_config(task_name, traj_list, idx):
+    if 'hit' in task_name:
+        traj_init_state = traj_list[idx]
+    elif 'defend' in task_name:
+        traj_init_state = traj_list[idx][0][0] # traj_num, timestep, state_idx
+        traj_init_state[0] -= 1.5 # hack to re-adjust the offset in the defend demos
 
     return traj_init_state
+
+
+def compute_ee_pos(current_traj, agent):
+    joint_angles = current_traj[:, 6:9]
+    ee_pos = []
+    for i in range(joint_angles.shape[0]):
+        agent.robot_data.qpos = joint_angles[i]
+        ee_pos.append(forward_kinematics(agent.robot_model, agent.robot_data, agent.robot_data.qpos)[0])
+    ee_pos = np.array(ee_pos)
+    return ee_pos
+
+def success_defend(ee_pos, current_traj, agent):
+    mallet_radius = agent.env_info['mallet']['radius']
+
+    puck_radius = 0.03165
+    puck_trajectory = current_traj[:, :2]
+
+    # for every point in the puck trajectory, check if it the distance to the ee is less than the sum of the radii
+    # do batched operation
+    ee_pos = ee_pos[:, :2]
+    dist = np.linalg.norm(ee_pos - puck_trajectory, axis=-1)
+    # print(dist)
+    # print(puck_radius + mallet_radius)
+    # print(np.any(dist < puck_radius + mallet_radius))
+    # add another small margin
+    return np.any(dist < puck_radius + mallet_radius)
 
 def make_policy(policy_class, policy_config):
     if policy_class == 'ACT':
@@ -180,7 +212,7 @@ def get_image(ts, camera_names):
 
 
 def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
-    pref = np.array([1])
+    pref = torch.tensor([0], dtype=torch.float32, device='cuda').unsqueeze(0)
     set_seed(1000)
     ckpt_dir = config['ckpt_dir']
     state_dim = config['state_dim']
@@ -221,6 +253,8 @@ def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
     else:
         raise NotImplementedError
 
+    agent = AgentBase(env.base_env.env_info)
+
     query_frequency = policy_config['num_queries']
     if temporal_agg:
         query_frequency = 1
@@ -232,20 +266,20 @@ def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
     successful_trajs = 0
     for rollout_id in range(num_rollouts):
         # demo_init_state, _, preference = sample_demo_data(traj_list)
-        demo_init_state = get_starting_config(traj_list, rollout_id)
+        demo_init_state = get_starting_config(task_name, traj_list, rollout_id)
         obs = env.reset(demo_init_state.copy())
+        inference_time_buffer = []
 
         ### evaluation loop
         if temporal_agg:
             all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, state_dim]).cuda()
 
-        q_list = []
-        target_q_list = []
+        current_traj = []
         with torch.inference_mode():
             for t in range(max_timesteps):
                 ### update onscreen render and wait for DT
                 if onscreen_render:
-                    env.render(record=False)
+                    env.render()
 
                 ### process previous timestep to get qpos
                 obs_numpy = obs
@@ -253,9 +287,10 @@ def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
                 obs = torch.from_numpy(obs).float().cuda().unsqueeze(0)
 
                 ### query policy
+                prev_time = time()
                 if config['policy_class'] == "ACT":
                     if t % query_frequency == 0:
-                        kwargs = {'env_state': obs[:, :env_dim], 'preferences': torch.tensor([1], dtype=torch.float32, device='cuda').unsqueeze(0)}
+                        kwargs = {'env_state': obs[:, :env_dim], 'preferences': pref}
                         all_actions = policy(obs[:, env_dim:], image=None, **kwargs)
                     if temporal_agg:
                         all_time_actions[[t], t:t+num_queries] = all_actions
@@ -271,6 +306,7 @@ def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
                         raw_action = all_actions[:, t % query_frequency]
                 else:
                     raise NotImplementedError
+                inference_time_buffer.append(time()-prev_time)
 
                 ### post-process actions
                 raw_action = raw_action.squeeze(0).cpu().numpy()
@@ -280,17 +316,22 @@ def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
                 ### step the environment
                 obs, _, done, info = env.step(target_q.reshape(-1, 2, 3).squeeze())
 
-                ### for visualization
-                q_list.append(obs_numpy[env_dim:])
-                target_q_list.append(target_q)
+                current_traj.append(obs_numpy.copy())
 
-                if done:
+                if 'hit' in task_name and done:
                     if info['success']:
                         successful_trajs += 1
                     break
+            if 'defend' in task_name:
+                current_traj = np.vstack(current_traj)
+                ee_pos_diffusion = compute_ee_pos(current_traj, agent)
+                blocked = success_defend(ee_pos_diffusion, current_traj, agent)
+                successful_trajs += blocked
 
             success_rate = successful_trajs / (rollout_id+1)
             print(f"Current success rate: {success_rate} ({successful_trajs}/{rollout_id+1})")
+            inference_time_buffer = np.array(inference_time_buffer)
+            print(f"Avg/Max step time this episode: {np.mean(inference_time_buffer)}s / {np.max(inference_time_buffer)}")
 
         # if save_episode:
         #     save_videos(image_list, DT, video_path=os.path.join(ckpt_dir, f'video{rollout_id}.mp4'))
