@@ -59,8 +59,9 @@ AGILE_TASK_CONFIGS = {
 
     'pingpong': {
         'dataset_dir': DATA_DIR + '/pingpong',
-        'dataset_names': 'pingpong.pkl',
-        'num_episodes': 50,
+        'dataset_names': ['height_43_new.pkl', 'height_55_new.pkl'],
+        'eval_dataset_name': None,
+        'num_episodes': 40,
         'episode_len': 100,
         'max_episode_len': 250,
         'robot_dim': 14,

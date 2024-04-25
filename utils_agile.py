@@ -36,15 +36,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
             start_ts = np.random.choice(episode_len)
 
         # get observation at start_ts only
-        bpos = states[start_ts, :3]
-        bvel = states[start_ts, 3:6]
         # hack for both airhockey and pingpong
         if states.shape[-1] == 12:
+            bpos = states[start_ts, :3]
+            bvel = states[start_ts, 3:6]
             qpos = states[start_ts, 6:9]
             qvel = states[start_ts, 9:]
-        elif states.shape[-1] == 20:
-            qpos = states[start_ts, 6:13]
-            qvel = states[start_ts, 13:]
+        elif states.shape[-1] == 17:
+            qpos = states[start_ts, :7]
+            qvel = states[start_ts, 7:14]
+            bpos = states[start_ts, 14:]
+            bvel = torch.zeros_like(bpos, dtype=torch.float32)
 
         # get all actions after and including start_ts
         action = actions[start_ts:]
@@ -79,14 +81,16 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
 
 def get_norm_stats(data):
-    if data[0].shape[-1] == 12:
+    if data[0].shape[-1] == 12:     # airhockey
         all_qpos_data = data[0][..., 6:9]
         all_qvel_data = data[0][..., 9:]
-    elif data[0].shape[-1] == 20:
-        all_qpos_data = data[0][..., 6:13]
-        all_qvel_data = data[0][..., 13:]
-    all_bpos_data = data[0][..., :3]
-    all_bvel_data = data[0][..., 3:6]
+        all_bpos_data = data[0][..., :3]
+        all_bvel_data = data[0][..., 3:6]
+    elif data[0].shape[-1] == 17:   # pingpong
+        all_qpos_data = data[0][..., :7]
+        all_qvel_data = data[0][..., 7:14]
+        all_bpos_data = data[0][..., 14:]
+        all_bvel_data = torch.zeros_like(all_bpos_data, dtype=torch.float32)  # no bvel data in pingpong
     all_action_data = data[1]
 
     # normalize action data
@@ -144,8 +148,12 @@ def load_data(dataset_dir, dataset_names, num_episodes, horizon, max_path_length
             for traj in data:
                 states = np.array([t[0] for t in traj], dtype=np.float32)
                 actions = np.array([t[1] for t in traj], dtype=np.float32)
-                actions = actions.reshape(-1, 6)
-                preferences = traj[0][6]  # all preferences are the same per trajectory
+
+                if 'airhockey' in dataset_dir:
+                    actions = actions.reshape(-1, 6)
+                    preferences = traj[0][6]  # all preferences are the same per trajectory
+                if 'pingpong' in dataset_dir:
+                    preferences = traj[0][2]
 
                 path_length = len(states)
                 if path_length > max_path_length:

@@ -331,7 +331,7 @@ def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
             success_rate = successful_trajs / (rollout_id+1)
             print(f"Current success rate: {success_rate} ({successful_trajs}/{rollout_id+1})")
             inference_time_buffer = np.array(inference_time_buffer)
-            print(f"Avg/Max step time this episode: {np.mean(inference_time_buffer)}s / {np.max(inference_time_buffer)}")
+            print(f"Avg/Max step time this episode: {np.mean(inference_time_buffer[1:])}s / {np.max(inference_time_buffer[1:])}")
 
         # if save_episode:
         #     save_videos(image_list, DT, video_path=os.path.join(ckpt_dir, f'video{rollout_id}.mp4'))
