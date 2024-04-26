@@ -43,10 +43,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
             qpos = states[start_ts, 6:9]
             qvel = states[start_ts, 9:]
         elif states.shape[-1] == 17:
-            qpos = states[start_ts, :7]
-            qvel = states[start_ts, 7:14]
-            bpos = states[start_ts, 14:]
+            bpos = states[start_ts, :3]
             bvel = torch.zeros_like(bpos, dtype=torch.float32)
+            qpos = states[start_ts, 3:10]
+            qvel = states[start_ts, 10:]
 
         # get all actions after and including start_ts
         action = actions[start_ts:]
@@ -87,9 +87,9 @@ def get_norm_stats(data):
         all_bpos_data = data[0][..., :3]
         all_bvel_data = data[0][..., 3:6]
     elif data[0].shape[-1] == 17:   # pingpong
-        all_qpos_data = data[0][..., :7]
-        all_qvel_data = data[0][..., 7:14]
-        all_bpos_data = data[0][..., 14:]
+        all_qpos_data = data[0][..., 3:10]
+        all_qvel_data = data[0][..., 10:]
+        all_bpos_data = data[0][..., :3]
         all_bvel_data = torch.zeros_like(all_bpos_data, dtype=torch.float32)  # no bvel data in pingpong
     all_action_data = data[1]
 
