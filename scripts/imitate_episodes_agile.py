@@ -357,9 +357,12 @@ def eval_bc(config, ckpt_name, eval_dataset_name, save_episode=True):
     return success_rate, avg_return
 
 
-def forward_pass(data, policy, use_preference=True):
+def forward_pass(data, policy, use_preference=True, use_bvel=True):
     bpos_data, bvel_data, qpos_data, qvel_data, action_data, preferences, is_pad = data
-    b_data = torch.cat([bpos_data, bvel_data], dim=1).cuda()
+    if use_bvel:
+        b_data = torch.cat([bpos_data, bvel_data], dim=1).cuda()
+    else:
+        b_data = bpos_data.cuda()
     q_data = torch.cat([qpos_data, qvel_data], dim=1).cuda()
     action_data = action_data.cuda()
     if use_preference:
@@ -380,10 +383,15 @@ def train_bc(train_dataloader, val_dataloader, config):
     policy_class = config['policy_class']
     policy_config = config['policy_config']
     task_name = config['task_name']
+    env_dim = config['env_dim']
 
     use_preference = True
     if 'defend' in task_name:
         use_preference = False
+
+    use_bvel = True
+    if env_dim != 6:
+        use_bvel = False
 
     set_seed(seed)
 
@@ -402,7 +410,7 @@ def train_bc(train_dataloader, val_dataloader, config):
             policy.eval()
             epoch_dicts = []
             for batch_idx, data in enumerate(val_dataloader):
-                forward_dict = forward_pass(data, policy, use_preference)
+                forward_dict = forward_pass(data, policy, use_preference, use_bvel)
                 epoch_dicts.append(forward_dict)
             epoch_summary = compute_dict_mean(epoch_dicts)
             validation_history.append(epoch_summary)
@@ -421,7 +429,7 @@ def train_bc(train_dataloader, val_dataloader, config):
         policy.train()
         optimizer.zero_grad()
         for batch_idx, data in enumerate(train_dataloader):
-            forward_dict = forward_pass(data, policy, use_preference)
+            forward_dict = forward_pass(data, policy, use_preference, use_bvel)
             # backward
             loss = forward_dict['loss']
             loss.backward()

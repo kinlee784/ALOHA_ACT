@@ -153,6 +153,10 @@ def load_data(dataset_dir, dataset_names, num_episodes, horizon, max_path_length
                     actions = actions.reshape(-1, 6)
                     preferences = traj[0][6]  # all preferences are the same per trajectory
                 if 'pingpong' in dataset_dir:
+                    # if '43' in dataset_name:
+                    #     preferences = np.array([0])
+                    # elif '55' in dataset_name:
+                    #     preferences = np.array([1])
                     preferences = traj[0][2]
 
                 path_length = len(states)

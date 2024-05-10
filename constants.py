@@ -58,14 +58,14 @@ AGILE_TASK_CONFIGS = {
     },
 
     'pingpong': {
-        'dataset_dir': DATA_DIR + '/pingpong',
-        'dataset_names': ['height_43_new.pkl', 'height_55_new.pkl'],
+        'dataset_dir': DATA_DIR + '/pingpong/three_stroke',
+        'dataset_names': ['bunt_p_0.pkl', 'bunt_p_n1.pkl', 'push_p_0.pkl', 'push_p_n1.pkl', 'lob_p_0.pkl', 'lob_p_n1.pkl'],
         'eval_dataset_name': None,
-        'num_episodes': 40,
+        'num_episodes': 90, # num episodes in the total dataset
         'episode_len': 100,
         'max_episode_len': 250,
         'robot_dim': 14,
-        'env_dim': 6,
+        'env_dim': 3,
         'camera_names': [None]
     },
 }
